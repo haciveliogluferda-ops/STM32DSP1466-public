@@ -2,6 +2,8 @@
 
 This document collects the Linkplay/MCU commands used by the STM32DSP1466 firmware, reverse-engineering notes for the AX31, and additional commands from the A98 MCU instruction PDF.
 
+Much of the work behind this map happened at the bench. I captured UART traffic from a real AX31 module and repeated tests to see when messages appeared and how the module responded. Codex helped me trace the exchanges, turn the bench notes into this reference, and cross-check the findings against the STM32 firmware.
+
 - `Firmware` refers to behavior implemented in `src/main.cpp`.
 - `AX31 RE` refers to behavior captured on the Up2Stream/A31 and recorded in `AX31UARTAPI.xlsx`.
 - `A98 PDF` refers to the newer protocol described in `Instructiondocument.pdf`. It is a reference for command meaning and sequence. Check compatibility on the A31.
