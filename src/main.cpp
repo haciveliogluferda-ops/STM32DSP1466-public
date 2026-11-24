@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 haciveliogluferda-ops
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 /*
  * STM32DSP1466 UI bring-up.
  *

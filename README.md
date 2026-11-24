@@ -24,3 +24,10 @@ The generated Analog Devices export files are created locally in step 1. The fro
 ## Board views
 
 [Top-side render](hardware/images/pcb-1466dsp-top.png) · [Bottom-side render](hardware/images/pcb-1466dsp-bottom.png) · [Front-panel menu](hardware/images/pcb-1466dsp-front-panel-menu.png)
+
+## Licensing
+
+- The original STM32 firmware code in `src/` and `include/` is licensed under the [GNU General Public License, version 3 or later](LICENSES/GPL-3.0-or-later.txt) (`GPL-3.0-or-later`).
+- The original EasyEDA schematic and PCB designs in `hardware/easyeda/` are licensed under the [CERN Open Hardware Licence Version 2 – Weakly Reciprocal](LICENSES/CERN-OHL-W-2.0.txt) (`CERN-OHL-W-2.0`). See the [hardware licence notice](hardware/easyeda/NOTICE.txt) for the source location.
+
+These licences let others build on the project and require source to be made available when covered modifications are distributed, as specified in each licence. Third-party libraries, assets, trademarks and vendor-generated files remain subject to their respective terms.
