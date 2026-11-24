@@ -1,0 +1,5 @@
+.pio/
+.vscode/
+dsp_export/
+*.bin
+*.elf
