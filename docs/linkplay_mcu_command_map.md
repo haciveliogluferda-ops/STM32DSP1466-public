@@ -1,305 +1,272 @@
 # Linkplay MCU Command Map
 
-Bu belge STM32DSP1466 firmware'inde kullanilan Linkplay/MCU komutlarini,
-AX31 reverse engineering notlarini ve A98 MCU instruction PDF'inden cikan ek
-komutlari tek yerde takip etmek icin hazirlandi.
+This document collects the Linkplay/MCU commands used by the STM32DSP1466 firmware, reverse-engineering notes for the AX31, and additional commands from the A98 MCU instruction PDF.
 
-Kaynak ayrimi:
+- `Firmware` refers to behavior implemented in `src/main.cpp`.
+- `AX31 RE` refers to behavior captured on the Up2Stream/A31 and recorded in `AX31UARTAPI.xlsx`.
+- `A98 PDF` refers to the newer protocol described in `Instructiondocument.pdf`. It is a reference for command meaning and sequence. Check compatibility on the A31.
 
-- `Firmware`: Su an `src/main.cpp` icinde aktif kullanilan davranis.
-- `AX31 RE`: `AX31UARTAPI.xlsx` icinde Up2Stream/A31 uzerinden yakalanan davranis.
-- `A98 PDF`: `Instructiondocument.pdf` icinde anlatilan daha modern protokol
-  davranisi. A31 icin dogrudan dogru kabul edilmez; anlam ve sira referansi
-  olarak kullanilir.
+Use the UART settings in this firmware for the A31 module in this project. The generic A98 settings apply to a different module.
 
-Not: Bizim mevcut programdaki Linkplay UART ayari dogru kabul edilir. PDF'teki
-genel UART ayarlari bu projedeki eski modulu gecersiz kilmaz.
+## Commands currently used by the firmware
 
-## Firmware'de Su An Kullandigimiz Komutlar
-
-| Yon | Komut | Firmware davranisi | Not |
+| Direction | Command | Firmware behavior | Notes |
 | --- | --- | --- | --- |
-| MCU -> LP | `MCU+VOL+%03u` | Mevcut volume degerini LP'ye bildirir. | `AXX+VOL+GET` cevabi olarak ve hazirlikta kullaniliyor. |
-| LP -> MCU | `AXX+VOL+GET` | `MCU+VOL+%03u` ile cevaplanir. | A98 PDF ile uyumlu. |
-| LP -> MCU | `AXX+VOL+nnn` | STM32 volume'u uygular ve EEPROM'a kaydeder. | `0..100` araligina sinirlanir. |
-| MCU -> LP | `MCU+PLM-xxx` | Mevcut source/mode bilgisini LP'ye bildirir. | Firmware `-` formunu kullaniyor; standby/boot sirasinda EEPROM'da son source BT/XLR/Optical olsa bile `000` raporlanir. Network source icinde son servis mode'u biliniyorsa `031/010/001` gibi geri raporlanabilir. |
-| LP -> MCU | `AXX+PLM+GET` | Deneysel olarak `MCU+PLM+xxx` ile cevaplanir. | Spotify standby wake dongusunde `-` formu yerine `+` formu deneniyor. Boot `MCU+VER...&MCU+PLM-xxx` ayni kalir. |
-| LP -> MCU | `AXX+PLM+nnn` | Gelen LP mode'una gore source secilir. | `031 Spotify`, `001 AirPlay`, `010 Radio` Network source icindeki servis/mod ipuclaridir; DSP source yine Network kalir. `040 Line In`, `041 Bluetooth`, `043 Optical`, `048 XLR`, `000 Network`. |
-| MCU -> LP | `MCU+VER+0035&MCU+PLM-xxx` | MCU versiyonunu ve mode'u birlikte bildirir. | `AXX+MCU+VER` ve `AXX+MCU+RDY` sonrasinda kullaniliyor; hemen ardindan `MCU+CAP+PLM00008214&` proaktif gonderilir. |
-| LP -> MCU | `AXX+MCU+VER` | Versiyon/mode cevabi gonderilir. | A98 PDF'te normal boot sorgularindan biri. |
-| LP -> MCU | `AXX+MCU+RDY` | Ilk hazir olusta versiyon, CAP, volume ve EQ bilgileri raporlanir. | Linkplay hazir sinyali; metadata hazir olayi `AXX+MEA+RDY` tarafidir. |
-| MCU -> LP | `MCU+RTC+GET` | LP/network time ister. | `AXX+GET+RTC` cevabi olarak kullaniliyor; LP once `AXX+RTC+NIL`, sonra NTP geldiginde `AXX+SET+RTC...` donebilir. |
-| MCU -> LP | `MCU+MEA+GET` | Metadata istenir. | Sonrasinda `MCU+PINFGET` zincirlenebilir. |
-| LP -> MCU | `AXX+MEA+DAT{...}&` | Hex metadata cozulur, ekrana yazilir. | Title/Artist/Album/Vendor. |
-| LP -> MCU | `AXX+MEA+RDY` | Media/player info hazir sayilir, `MCU+PINFGET` tetiklenir. | Spotify standby wake denemelerinde tekrar `MCU+MEA+GET` basmak dongu yaratabildi. |
-| MCU -> LP | `MCU+PINFGET` | Player/session bilgisi istenir. | `AXX+PLY+INF{...}&` beklenir. |
-| LP -> MCU | `AXX+PLY+INF{...}&` | Player info, volume, mute, sureler ve metadata islenir. | Spotify gibi kaynaklarda onemli. |
-| LP -> MCU | `AXX+PLY+INF{..."loop":"0/1/3/4"...}` | Playback loop/shuffle durumu. | Firmware `0=repeat all/album`, `1=repeat one`, `3=shuffle/random` ikonlarini gosterir; `4=normal/clear` ve bilinmeyen `2` icin ikon basmaz. Mute ikonu varsa loop ikonundan once gelir. |
-| MCU -> LP | `MCU+PLY+PUS` | Play/pause toggle veya standby oncesi pause. | Network/Linkplay transport icin kullaniliyor. Standby'ye girerken sadece son bilinen state `play` ise gonderilir; `pause/stop` iken gondermek Spotify'i yeniden play'e cekebilir. |
-| MCU -> LP | `MCU+PLY+NXT` | Sonraki parca. | IR/terminal next icin kullaniliyor; standby ekranda da current source Network ise gonderilebilir. |
-| MCU -> LP | `MCU+PLY+PRV` | Onceki parca. | IR/terminal previous icin kullaniliyor; standby ekranda da current source Network ise gonderilebilir. |
-| LP -> MCU | `AXX+PLY+001` | Transport play event'i. | Network source standby wake icin ana tetiklerden biri. |
-| LP -> MCU | `AXX+PLY+000` | Pause kabul edilir. | |
-| LP -> MCU | `AXX+SPY+001` | Spotify session aktif bilgisi. | Cihaz seciminde de gelebilir; auto-wake tetiklemez. |
-| LP -> MCU | `AXX+PLM+031` | Spotify mode bildirimi. | Kaynak olarak Network'e gecirir ve metadata ister; Spotify ikon/baslik karari `MEA+DAT` vendor veya `PLY+INF` mode bilgisinden sonra verilir. Spotify standby wake dongusunde `PLM+GET` cevabi icin `MCU+PLM+031` deneniyor. |
-| LP -> MCU | `AXX+PLY+INF{..."status":"play"...}` | Gercek play state. | Standby'dan auto-wake icin ana tetik. |
-| MCU -> LP | `MCU+MUT+001` / `MCU+MUT+000` | LP mute durumunu bildirir. | Firmware mute toggle'da gonderiyor. |
-| LP -> MCU | `AXX+MUT+001` / `AXX+MUT+000` | STM32 mute uygular. | |
-| LP -> MCU | `AXX+WWW+001` / `AXX+WWW+000` | WiFi hazir/deger durumunu takip eder. | Firmware `linkplayWifiReady` set ediyor. |
-| LP -> MCU | `AXX+SET+RTCYYYYMMDDHHMMSS&` | STM32 saatini gelen UTC RTC string'i ile senkronlar. | PDF'te RTC/app zaman akisi aciklanmis. |
-| LP -> MCU | `AXX+NXT+ALS<n>&` | Daylight Saving / local summer-time offset bildirimi olabilir. | `ALS-1` 1 saat DST farki, `ALS-2` 2 saat fark gibi yorumlandi. RTC set akisi sonrasi gelebiliyor; firmware su an saat uzerine ayrica uygulamiyor. |
-| LP -> MCU | `AXX+BOT+DON` / `AXX+BOT+UP0` | LP boot bildirimi. | Firmware bir kez `MCU+BOT+DON` ile cevap verir. |
-| LP -> MCU | `AXX+PAS+EQGet&` | Bass/treble EQ degeri raporlanir. | |
-| LP -> MCU | `AXX+PAS+EQSet:bass:n&` | Bass gain'e cevrilir ve DSP'ye yazilir. | |
-| LP -> MCU | `AXX+PAS+EQSet:treble:n&` | Treble gain'e cevrilir ve DSP'ye yazilir. | |
-| MCU -> LP | `MCU+PAS+EQSet:bass:nn&MCU+PAS+EQSet:treble:nn&` | EQ durumunu LP/app tarafina raporlar. | AX31 V3'te cevap vermedigi not edilmis, ama firmware kullaniyor. |
+| MCU -> LP | `MCU+VOL+%03u` | Reports the current volume to LP. | Used during initialization and in response to `AXX+VOL+GET`. |
+| LP -> MCU | `AXX+VOL+GET` | Replies with `MCU+VOL+%03u`. | Matches the A98 PDF. |
+| LP -> MCU | `AXX+VOL+nnn` | The STM32 applies the volume and saves it to EEPROM. | Clamped to `0..100`. |
+| MCU -> LP | `MCU+PLM-xxx` | Reports the current source or mode to LP. | The firmware uses the `-` form. During standby or boot, it reports `000` even if the last saved source was BT, XLR or Optical. For the Network source it may report a known last service mode such as `031/010/001`. |
+| LP -> MCU | `AXX+PLM+GET` | Experimentally replies with `MCU+PLM+xxx`. | The Spotify standby wake sequence tests the `+` form in place of the `-` form. The boot message `MCU+VER...&MCU+PLM-xxx` stays the same. |
+| LP -> MCU | `AXX+PLM+nnn` | Selects the source according to the LP mode. | `031 Spotify`, `001 AirPlay` and `010 Radio` identify services within Network, so the DSP source stays Network. Other modes are `040 Line In`, `041 Bluetooth`, `043 Optical`, `048 XLR` and `000 Network`. |
+| MCU -> LP | `MCU+VER+0035&MCU+PLM-xxx` | Reports the MCU firmware version and mode together. | Sent after `AXX+MCU+VER` and `AXX+MCU+RDY`, immediately followed by `MCU+CAP+PLM00008214&`. |
+| LP -> MCU | `AXX+MCU+VER` | Sends the version and mode response. | A normal boot query in the A98 PDF. |
+| LP -> MCU | `AXX+MCU+RDY` | On the first ready notification, reports version, capabilities, volume and EQ. | Signals that Linkplay is ready. `AXX+MEA+RDY` signals metadata readiness. |
+| MCU -> LP | `MCU+RTC+GET` | Requests network time from LP. | Used in response to `AXX+GET+RTC`. LP may first send `AXX+RTC+NIL`, then `AXX+SET+RTC...` once it has NTP time. |
+| MCU -> LP | `MCU+MEA+GET` | Requests metadata. | Can be followed by `MCU+PINFGET`. |
+| LP -> MCU | `AXX+MEA+DAT{...}&` | Decodes hex metadata for display. | Title, artist, album and vendor. |
+| LP -> MCU | `AXX+MEA+RDY` | Treats media or player information as ready and triggers `MCU+PINFGET`. | Sending `MCU+MEA+GET` again caused a loop in Spotify standby wake tests. |
+| MCU -> LP | `MCU+PINFGET` | Requests player or session information. | Expects `AXX+PLY+INF{...}&`. |
+| LP -> MCU | `AXX+PLY+INF{...}&` | Processes player information, volume, mute, timing and metadata. | Relevant to sources such as Spotify. |
+| LP -> MCU | `AXX+PLY+INF{..."loop":"0/1/3/4"...}` | Reports repeat or shuffle status. | The firmware shows icons for `0=repeat all/album`, `1=repeat one` and `3=shuffle/random`. It shows no loop icon for `4=normal/clear` or unknown value `2`. The mute icon appears first when present. |
+| MCU -> LP | `MCU+PLY+PUS` | Toggles play/pause or pauses before standby. | Used for Network/Linkplay transport. On entering standby, it is sent only if the last known state was `play`. Sending it in the `pause/stop` state can restart Spotify. |
+| MCU -> LP | `MCU+PLY+NXT` | Skips to the next track. | Used by IR and the terminal. Can also be sent on the standby screen when Network is the current source. |
+| MCU -> LP | `MCU+PLY+PRV` | Skips to the previous track. | Used by IR and the terminal. Can also be sent on the standby screen when Network is the current source. |
+| LP -> MCU | `AXX+PLY+001` | Playback started. | A primary trigger for waking from standby on the Network source. |
+| LP -> MCU | `AXX+PLY+000` | Treated as pause. | |
+| LP -> MCU | `AXX+SPY+001` | Indicates an active Spotify session. | Can also arrive when selecting the device. It does not trigger auto-wake. |
+| LP -> MCU | `AXX+PLM+031` | Reports Spotify mode. | Selects Network and requests metadata. The Spotify icon or label is chosen after the vendor in `MEA+DAT` or the mode in `PLY+INF` is known. The Spotify standby wake sequence tests `MCU+PLM+031` as the reply to `PLM+GET`. |
+| LP -> MCU | `AXX+PLY+INF{..."status":"play"...}` | Reports actual playback. | A primary auto-wake trigger. |
+| MCU -> LP | `MCU+MUT+001` / `MCU+MUT+000` | Reports mute state to LP. | Sent when mute is toggled. |
+| LP -> MCU | `AXX+MUT+001` / `AXX+MUT+000` | The STM32 applies the mute state. | |
+| LP -> MCU | `AXX+WWW+001` / `AXX+WWW+000` | Tracks Wi-Fi readiness. | Updates `linkplayWifiReady`. |
+| LP -> MCU | `AXX+SET+RTCYYYYMMDDHHMMSS&` | Synchronizes the STM32 clock from the incoming UTC RTC string. | The A98 PDF describes the RTC and app time flow. |
+| LP -> MCU | `AXX+NXT+ALS<n>&` | May report a daylight-saving or local-time offset. | `ALS-1` was interpreted as a one-hour DST difference and `ALS-2` as two hours. It can follow an RTC update. The firmware does not apply it separately. |
+| LP -> MCU | `AXX+BOT+DON` / `AXX+BOT+UP0` | LP boot notification. | The firmware responds once with `MCU+BOT+DON`. |
+| LP -> MCU | `AXX+PAS+EQGet&` | Reports the bass and treble settings. | |
+| LP -> MCU | `AXX+PAS+EQSet:bass:n&` | Converts the value to bass gain and writes it to the DSP. | |
+| LP -> MCU | `AXX+PAS+EQSet:treble:n&` | Converts the value to treble gain and writes it to the DSP. | |
+| MCU -> LP | `MCU+PAS+EQSet:bass:nn&MCU+PAS+EQSet:treble:nn&` | Reports the EQ state to LP or the app. | The AX31 V3 notes report no response, but the firmware still sends it. |
 
-## AX31 RE Dokumaninda Kanitli Komutlar
+## Commands observed in the AX31 reverse-engineering notes
 
-| Yon | Komut | Yakalanan cevap/davranis | Durum |
+| Direction | Command | Captured response or behavior | Status |
 | --- | --- | --- | --- |
-| MCU -> LP | `MCU+BOT+DON` | `AXX+BOT+DON`, sonra `AXX+BOT+UP0`. | Boot handshake icin kanitli. Firmware `AXX+BOT+DON/UP0` sonrasi bir kez cevapliyor. |
-| MCU -> LP | `MCU+POW+SAV` | `AXX+POW+001`, ardindan `AXX+RA0+000`. | A31'de power-save/on-off davranisi gibi. Tam power-off olmayabilir. |
-| MCU -> LP | `MCU+WWW+GET` | `AXX+WWW+001`. | WiFi durum sorgusu. |
-| MCU -> LP | `MCU+GET+UID` | `AXX+UID+...&`. | Boot sekansinda kullanilmis. |
-| MCU -> LP | `MCU+DEV+GET` | `AXX+DEV+INF...&`. | Kisa device info. |
-| MCU -> LP | `MCU+INF+GET` | `AXX+INF+INF{...}&`. | Detayli device info. |
-| MCU -> LP | `MCU+PLP+GET` | `AXX+PLP+004`. | Play loop/sira durumu. |
-| MCU -> LP | `MCU+PLP+000` | Boot sekansinda gonderilmis. | Anlami play loop/mode raporu olabilir. |
-| MCU -> LP | `MCU+EQ+GTYP` | Boot sekansinda gonderilmis. | App/EQ tipi icin olabilir. |
-| MCU -> LP | `MCU+VOL+030` | Volume set eder. | Set komutu. |
-| MCU -> LP | `MCU+VOL+GET` | `AXX+VOL+value`. | Module volume sorgusu. |
-| MCU -> LP | `MCU+VOL-100` | `AXX+VOL+100`. | MCU'nun kendi volume degerini module bildirmesi olarak not edilmis. |
-| MCU -> LP | `MCU+PLM+000` | `AXX+PLM+000`, Network. | `+` formu module source switch icin. |
-| MCU -> LP | `MCU+PLM+005` | `AXX+PLM+040`, Line In. | AX31 mode mapping; Aux-In icin. |
+| MCU -> LP | `MCU+BOT+DON` | `AXX+BOT+DON`, then `AXX+BOT+UP0`. | Confirmed in the boot handshake. The firmware replies once after `AXX+BOT+DON/UP0`. |
+| MCU -> LP | `MCU+POW+SAV` | `AXX+POW+001`, followed by `AXX+RA0+000`. | Appears to enter power-save on the A31. It may leave the module powered. |
+| MCU -> LP | `MCU+WWW+GET` | `AXX+WWW+001`. | Queries Wi-Fi status. |
+| MCU -> LP | `MCU+GET+UID` | `AXX+UID+...&`. | Used in the boot sequence. |
+| MCU -> LP | `MCU+DEV+GET` | `AXX+DEV+INF...&`. | Short device information. |
+| MCU -> LP | `MCU+INF+GET` | `AXX+INF+INF{...}&`. | Detailed device information. |
+| MCU -> LP | `MCU+PLP+GET` | `AXX+PLP+004`. | Playback repeat or queue mode. |
+| MCU -> LP | `MCU+PLP+000` | Sent during the boot sequence. | May report repeat or playback mode. |
+| MCU -> LP | `MCU+EQ+GTYP` | Sent during the boot sequence. | May relate to the app's EQ type. |
+| MCU -> LP | `MCU+VOL+030` | Sets volume. | Setter. |
+| MCU -> LP | `MCU+VOL+GET` | `AXX+VOL+value`. | Queries the module's volume. |
+| MCU -> LP | `MCU+VOL-100` | `AXX+VOL+100`. | Recorded as the MCU reporting its own volume to the module. |
+| MCU -> LP | `MCU+PLM+000` | `AXX+PLM+000`, Network. | The `+` form switches the module's source. |
+| MCU -> LP | `MCU+PLM+005` | `AXX+PLM+040`, Line In. | AX31 mapping for Aux-In. |
 | MCU -> LP | `MCU+PLM+006` | `AXX+PLM+041`, Bluetooth. | AX31 mode mapping. |
 | MCU -> LP | `MCU+PLM+008` | `AXX+PLM+043`, Optical. | AX31 mode mapping. |
-| MCU -> LP | `MCU+PLM+010` | `AXX+PLM+045`, Coaxial. | Bizde aktif kaynak degil. |
-| MCU -> LP | `MCU+PLM+012` | `AXX+PLM+047`, Line In 2. | Bizde aktif kaynak degil. |
-| MCU -> LP | `MCU+PLM+013` | `AXX+PLM+048`, XLR. | CAP+PLM ile XLR acildiktan sonra bizim XLR source icin dogru mapping. |
-| MCU -> LP | `MCU+USB+GET` | `AXX+USB+000` / `001`. | USB device sorgusu. `001` USB bellek takili/algilandi, `000` USB bellek yok/cikarildi olarak tak-cikar testinde goruldu. Bu event source degistirme degil; aktif playback source icin `PLY+INF mode` esas alinmali. |
-| LP -> MCU | `AXX+PLY+INF{..."mode":"11"...}` | USB flash playback. | Uygun formatli USB bellekten calarken goruldu. Fiziksel DSP yolu Linkplay olarak kalir; firmware bunu logical Linkplay mode olarak `USB` basligiyle gosterir. |
-| LP -> MCU | `AXX+PLY+INF{..."mode":"51"...}` | USBDAC varyanti. | Up2Stream kartlarda USB DAC farkli bir MCU/USB yolu olabilir; bu projede fiziksel USB DAC yok. Firmware bu modu desteklenen ayri bir kaynak gibi gostermemeli; USB flash icin esas mode `11`. |
-| MCU -> LP | `MCU+MUT+GET` | `AXX+MUT+000` / `001`. | Mute sorgusu. |
-| MCU -> LP | `MCU+PLY-PLA` | `AXX+MEA+RDY`. | Play komutu veya oynatma baslatma varyanti. |
-| MCU -> LP | `MCU+PLY-STP` | Cevap yok. | Stop current playback. |
-| MCU -> LP | `MCU+PLY+PUQ` | `AXX+KEY+NIL`. | Islev belirsiz/NA. |
-| MCU -> LP | `MCU+KEY+001` | `AXX+KEY+NIL`. | Muhtemelen uygulanmiyor. |
-| LP -> MCU | `AXX+GET+RTC` | Boot sirasinda geliyor. | Firmware su an bunu cevaplamiyor; RTC konusu icin aday. |
-| LP -> MCU | `AXX+CHN+GET` | Boot sirasinda geliyor. | Kanal bilgisi sorgusu; cevap davranisi netlestirilecek. |
-| LP -> MCU | `AXX+CHN+001/002/000` | Sol/sag/stereo kanal olayi. | App tarafindan gelebiliyor. |
-| LP -> MCU | `AXX+PMT+000/001` | Voice prompt basla/bitis veya prompt status. | Boot ve app komutlari sirasinda gorulmus. |
-| LP -> MCU | `AXX+SIL+001` | Bluetooth'a gecis istegi gibi not edilmis. | Firmware su an islemiyor. |
-| LP -> MCU | `AXX+SIL+000` | Line In'e gecis istegi gibi not edilmis. | Firmware su an islemiyor. |
-| LP -> MCU | `AXX+SLV+YES/000/001/NOT` | Multiroom slave/master durumlari. | `001` baska cihaz bize slave oldu: header `M`; `YES` biz slave olduk: header `Slave`; `000/NOT` clear. |
-| LP -> MCU | `AXX+BT+GPRL` | Boot sirasinda gorulmus. | BT profili/eslesme listesi olabilir; netlestirilecek. |
-| LP -> MCU | `AXX+FACTORY` | Factory/reset surecinde gorulmus. | Firmware su an islemiyor. |
-| LP -> MCU | `AXX+DEV+RST` | Restart/factory sonrasi gorulmus. | Firmware su an islemiyor. |
-| LP -> MCU | `AXX+STA+001/002` | Network state olaylari. | Firmware boot ekraninda ara mesaj icin kullaniyor; WiFi hazir/yok kararini hala `WWW` belirliyor. |
+| MCU -> LP | `MCU+PLM+010` | `AXX+PLM+045`, Coaxial. | Inactive in this project. |
+| MCU -> LP | `MCU+PLM+012` | `AXX+PLM+047`, Line In 2. | Inactive in this project. |
+| MCU -> LP | `MCU+PLM+013` | `AXX+PLM+048`, XLR. | Correct mapping for this project's XLR source once enabled via CAP+PLM. |
+| MCU -> LP | `MCU+USB+GET` | `AXX+USB+000` / `001`. | USB detection query. In plug/unplug tests, `001` meant a drive was detected and `000` meant it was absent or removed. Use `PLY+INF mode` to determine the active playback source. |
+| LP -> MCU | `AXX+PLY+INF{..."mode":"11"...}` | USB flash playback. | Observed with a compatible USB drive. The DSP still uses its Linkplay input and the firmware shows the logical mode as `USB`. |
+| LP -> MCU | `AXX+PLY+INF{..."mode":"51"...}` | USB DAC variant. | Some Up2Stream boards may use a separate MCU/USB path. This project has no USB DAC hardware. Mode `11` identifies USB flash playback. |
+| MCU -> LP | `MCU+MUT+GET` | `AXX+MUT+000` / `001`. | Queries mute status. |
+| MCU -> LP | `MCU+PLY-PLA` | `AXX+MEA+RDY`. | Play command or playback-start variant. |
+| MCU -> LP | `MCU+PLY-STP` | No response. | Stops current playback. |
+| MCU -> LP | `MCU+PLY+PUQ` | `AXX+KEY+NIL`. | Function unclear or unavailable. |
+| MCU -> LP | `MCU+KEY+001` | `AXX+KEY+NIL`. | Likely unimplemented. |
+| LP -> MCU | `AXX+GET+RTC` | Arrives during boot. | The original capture notes record this as unanswered and a candidate for RTC handling. The later debug notes below record a firmware response. |
+| LP -> MCU | `AXX+CHN+GET` | Arrives during boot. | Queries channel information. The response behavior was still to be confirmed at this point. |
+| LP -> MCU | `AXX+CHN+001/002/000` | Left, right or stereo channel event. | Can come from the app. |
+| LP -> MCU | `AXX+PMT+000/001` | Voice prompt start/end or status. | Seen during boot and app commands. |
+| LP -> MCU | `AXX+SIL+001` | Recorded as a possible request to switch to Bluetooth. | The firmware currently ignores it. |
+| LP -> MCU | `AXX+SIL+000` | Recorded as a possible request to switch to Line In. | The firmware currently ignores it. |
+| LP -> MCU | `AXX+SLV+YES/000/001/NOT` | Multiroom master/slave status. | `001` means another device joined as a slave and displays `M`. `YES` means this device joined as a slave and displays `Slave`. `000/NOT` clears the indication. |
+| LP -> MCU | `AXX+BT+GPRL` | Seen during boot. | May concern a Bluetooth profile or pairing list. Unconfirmed. |
+| LP -> MCU | `AXX+FACTORY` | Seen during a factory reset. | The firmware currently ignores it. |
+| LP -> MCU | `AXX+DEV+RST` | Seen after a restart or factory reset. | The original AX31 notes record it as unhandled. |
+| LP -> MCU | `AXX+STA+001/002` | Network state events. | Used for intermediate boot-screen messages. `WWW` still determines Wi-Fi readiness. |
 
-## 2026-08-24 Debug Bulgulari
+## Debug observations from 2026-08-24
 
-Bu bolum klon ST-Link + debug UART ile, `lplog` acikken canli AX31 modul
-uzerinden olculen davranislari kaydeder.
+These observations came from a live AX31 module with a clone ST-Link, debug UART and `lplog` enabled.
 
-### Boot / Ready
+### Boot and ready
 
-| Akis | Gozlem | Sonuc |
+| Sequence | Observation | Result |
 | --- | --- | --- |
-| Cold boot / power cycle | `AXX+BOT+DON`, `AXX+BOT+UP0`, sonra `AXX+MCU+RDY` goruldu. | `BOT` cold boot/heartbeat alanina ait. |
-| Elle `lp MCU+BOT+DON` | LP `AXX+BOT+DON` ile cevap verdi. Firmware otomatik `MCU+BOT+DON` donunce LP bir kez daha `AXX+BOT+DON` verdi. | `AXX+BOT+DON` hem boot bildirimi hem de `MCU+BOT+DON` ACK'i gibi davranabiliyor. Sonsuz dongu flag ile engellenmeli. |
-| `AXX+MCU+RDY` | Firmware ilk hazir olusta `MCU+VER+0035&MCU+PLM-000`, `MCU+CAP+PLM00008214&`, volume, neutral EQ ve mevcut EQ raporlar. | Ready sonrasi state raporlama calisiyor; tekrar eden RDY'ler metadata hazir olayi gibi yorumlanmamali. |
+| Cold boot or power cycle | `AXX+BOT+DON` and `AXX+BOT+UP0` appeared, followed by `AXX+MCU+RDY`. | `BOT` belongs to the cold-boot or heartbeat sequence. |
+| Manual `lp MCU+BOT+DON` | LP replied with `AXX+BOT+DON`. When the firmware automatically sent `MCU+BOT+DON`, LP sent `AXX+BOT+DON` again. | `AXX+BOT+DON` can be both a boot notification and an acknowledgment of `MCU+BOT+DON`. Use a flag to prevent a reply loop. |
+| `AXX+MCU+RDY` | On first readiness, the firmware reports `MCU+VER+0035&MCU+PLM-000`, `MCU+CAP+PLM00008214&`, volume, neutral EQ and the current EQ settings. | State reporting after ready works. Repeated RDY events still indicate module readiness. Metadata readiness has its own event. |
 
 ### Power
 
-| Komut | Olculen cevap/event | Sonuc |
+| Command | Observed response or event | Result |
 | --- | --- | --- |
-| `MCU+POW+STA` | `AXX+POW+000` | `000` aktif/normal state. |
-| `MCU+POW+SAV` | `AXX+POW+001`, sonra `AXX+RA0+000` | Power-save/sleep state. `RA0+000` AP/interface kapanisi olabilir. |
-| `MCU+POW+STA` after SAV | `AXX+POW+001` | `001` power-save state dogrulandi. |
-| `MCU+POW+RES` | `AXX+STA+000`, `AXX+POW+000`, ardindan `STA/WWW/PMT/MUT` event dalgasi. | Power-save'den aktif moda donus. Tam boot degil; `AXX+BOT...` uretmedi. |
-| `MCU+POW+OFF` | Yaklasik 5.16 s sonra `AXX+POW+OFF`. | Hard-off hazirlik handshake'i calisiyor. 2 s timeout kisa; 8-10 s beklemek daha guvenli. |
-| `MCU+POW+STA` after OFF without rail cut | `AXX+POW+000` | `POW+OFF` sonrasi MCU rail kesmezse modul aktif state'e donebiliyor veya en azindan aktif raporluyor. |
+| `MCU+POW+STA` | `AXX+POW+000` | `000` means active or normal. |
+| `MCU+POW+SAV` | `AXX+POW+001`, then `AXX+RA0+000` | Power-save or sleep. `RA0+000` may indicate AP or interface shutdown. |
+| `MCU+POW+STA` after SAV | `AXX+POW+001` | Confirmed `001` as power-save. |
+| `MCU+POW+RES` | `AXX+STA+000`, `AXX+POW+000`, followed by a burst of `STA/WWW/PMT/MUT` events. | Resumes from power-save without a full boot. The module sent no `AXX+BOT...`. |
+| `MCU+POW+OFF` | `AXX+POW+OFF` after about 5.16 s. | The hard-off handshake works. A 2 s timeout is too short. Allow 8–10 s. |
+| `MCU+POW+STA` after OFF with power still connected | `AXX+POW+000` | After `POW+OFF`, if the MCU leaves the rail powered, the module can return to active or at least report that state. |
 
-`MCU+POW+RES` notu: Resume sonrasi "connected to your WiFi network" prompt'u
-bir veya iki kez duyulabiliyor. Logda `WWW`, `PMT` ve `MUT` event'leri iki
-dalga halinde gelebiliyor. Bu nedenle standby'dan donerken `POW+RES` sadece
-`POW+STA` sonucu `001` ise kullanilmali; `000` iken gereksiz RES prompt
-yan etkisi yaratabilir.
+After `MCU+POW+RES`, the “connected to your WiFi network” prompt may play once or twice. The log may contain two bursts of `WWW`, `PMT` and `MUT` events. When resuming from standby, send `POW+RES` if `POW+STA` returns `001`. Sending RES when the module already reports `000` can replay the prompt.
 
-### RTC / Time
+### RTC and time
 
-| Akis | Gozlem | Sonuc |
+| Sequence | Observation | Result |
 | --- | --- | --- |
-| Boot sirasinda | `AXX+GET+RTC` geldi, firmware `MCU+RTC+GET` dondu. | "Gecerli RTC yok, network time ver" yaklasimi calisiyor. |
-| Cold boot erken | `MCU+RTC+GET` sonrasi `AXX+RTC+NIL` goruldu. | LP henuz network/NTP time bilmiyorsa NIL donebiliyor. |
-| WiFi/NTP sonrasi | `AXX+SET+RTC20260824185015&`, `AXX+SET+WEK1&` ve bazi akislarda `AXX+NXT+ALS-1&` goruldu. | LP network time elde edince MCU'ya push ediyor. `WEK` haftanin gunu; `ALS` daylight-saving/local offset bilgisi gibi gorunuyor. Firmware RTC string'i isliyor; `WEK/ALS` su an saat uzerine ayrica uygulanmiyor. |
-| Playback sirasinda | `lp MCU+RTC+GET` test edilecek. | Calarken zaman sorgusu yapilabiliyor mu henuz olculmedi. |
+| During boot | `AXX+GET+RTC` arrived and the firmware replied with `MCU+RTC+GET`. | The firmware can request network time when it has no valid RTC time to report. |
+| Early cold boot | `AXX+RTC+NIL` followed `MCU+RTC+GET`. | LP can return NIL before obtaining network or NTP time. |
+| After Wi-Fi/NTP | `AXX+SET+RTC20260824185015&`, `AXX+SET+WEK1&` and in some cases `AXX+NXT+ALS-1&`. | LP pushes time once available. `WEK` appears to be the day of the week, and `ALS` a daylight-saving or local offset. The firmware processes the RTC string. It applies no separate `WEK/ALS` adjustment. |
+| During playback | `lp MCU+RTC+GET` remains to be tested. | Time queries during playback are unverified. |
 
 ### Channel
 
-| Akis | Gozlem | Sonuc |
+| Sequence | Observation | Result |
 | --- | --- | --- |
-| Boot sirasinda | `AXX+CHN+GET` geldi. | LP kanal bilgisini soruyor. |
-| Firmware cevabi | `MCU+CHN+000` gonderildi. | `000` stereo cevabi kabul ediliyor; akisi bozmadigi gozlemlendi. |
+| During boot | `AXX+CHN+GET` arrived. | LP queries channel configuration. |
+| Firmware response | `MCU+CHN+000` was sent. | The exchange continued normally with `000` as the stereo response. |
 
-### Spotify / Network Playback
+### Spotify and network playback
 
-| Akis | Gozlem | Sonuc |
+| Sequence | Observation | Result |
 | --- | --- | --- |
-| Spotify secimi | `AXX+PLM+031`, `AXX+MEA+RDY`, firmware `MCU+MEA+GET` gonderdi. | `031` Network icinde Spotify servis ipucu. DSP source Network kalir, metadata zinciri baslar. |
-| Metadata | `AXX+MEA+DAT{... "vendor":"53706F74696679" ...}&`, sonra `MCU+PINFGET`. | Vendor Spotify; title/artist/album hex gelebiliyor. |
-| Player info | `AXX+PLY+INF{..."mode":"31","status":"pause/play",...}` | Player state, duration, position, volume, mute aliniyor. |
-| Play start | `AXX+PLY+001` geldi; firmware `AMP_ENABLE ON from lp-ply` ile uyandi. | LP playback auto-wake calisiyor. |
-| Bitişik frame | `AXX+SPY+001AXX+MEA+DAT...` goruldu. | Parser `AXX+` ayirimi sayesinde bitisik frame'leri isleyebiliyor. `SPY+001` su an ignore. |
+| Select Spotify | `AXX+PLM+031` and `AXX+MEA+RDY` arrived, and the firmware sent `MCU+MEA+GET`. | `031` identifies Spotify within Network. The DSP stays on Network and the metadata exchange starts. |
+| Metadata | `AXX+MEA+DAT{... "vendor":"53706F74696679" ...}&`, then `MCU+PINFGET`. | The vendor is Spotify. Title, artist and album can arrive in hex. |
+| Player info | `AXX+PLY+INF{..."mode":"31","status":"pause/play",...}` | Provides player state, duration, position, volume and mute. |
+| Playback start | `AXX+PLY+001` arrived and the firmware woke with `AMP_ENABLE ON from lp-ply`. | LP playback auto-wake works. |
+| Concatenated frames | `AXX+SPY+001AXX+MEA+DAT...` was observed. | The parser uses `AXX+` boundaries to handle adjacent frames. It currently ignores `SPY+001`. |
 
-Not: `AXX+MEA+RDY`, AX31 tarafinda media info hazir olayi gibi davranir.
-Spotify standby wake denemelerinde `PLM+031` sonrasi zaten `MCU+MEA+GET`
-gonderildigi icin, `MEA+RDY` uzerine tekrar `MCU+MEA+GET` basmak akisi
-donguye sokabildi. Firmware bu event'te dogrudan `MCU+PINFGET` sorar.
+On AX31, `AXX+MEA+RDY` signals that media information is ready. In Spotify standby wake tests, the firmware had already sent `MCU+MEA+GET` after `PLM+031`. Sending `MCU+MEA+GET` again on `MEA+RDY` could create a loop. The firmware now requests `MCU+PINFGET` directly on that event.
 
-Ornek decode:
+Example decoded metadata
 
 - Title: `Kara Bahtima Kustum`
 - Artist: `Tuncay Kemertas`
 - Album: `Kayla`
 - Vendor: `Spotify`
 
-## A98 PDF'ten Ek Olarak Buldugumuz/Aday Komutlar
+## Additional and candidate commands from the A98 PDF
 
-Bu bolumdeki komutlar eski AX31 modulde mutlaka ayni calisir kabul edilmemeli.
-Ancak protokol akisini anlamak ve deneme listesi cikarmak icin onemli.
+Use these commands as a protocol and test reference. Their behavior on the older AX31 module still needs to be checked where noted.
 
-### Boot ve OOBE
+### Boot and OOBE
 
-| Yon | Komut | PDF'teki anlam | Proje notu |
+| Direction | Command | Meaning in the PDF | Project notes |
 | --- | --- | --- | --- |
-| LP -> MCU | `AXX+CAP+GET` | Factory/OOBE sirasinda urun capability bilgilerini ister. | Firmware cevapliyor; normal AX31 boot'ta her zaman gelmeyebilir. |
-| MCU -> LP | `MCU+CAP+PRJproject_name&` | Zorunlu proje/urun adi. | OOBE gerekiyorsa eklenebilir. |
-| MCU -> LP | `MCU+PTV+nnn` | MCU protokol versiyonu. | AX31 firmware `MCU+VER+0035` kullaniyor; fark not edilmeli. |
-| MCU -> LP | `MCU+CAP+001xxxxxxxx&` | Capability bitleri. | Bit 16: MCU RTC var. Bizde RTC var ama backup pil yok. |
-| MCU -> LP | `MCU+CAP+002xxxxxxxx&` | Capability bitleri 2. | Gercek CAP2 degeri net degil; `INF` icindeki `capability` ile ayni kabul edilmemeli. |
-| MCU -> LP | `MCU+CAP+LAUlanguage&` | Varsayilan dil. | Gerekmeyebilir. |
-| MCU -> LP | `MCU+CAP+STMxxxxxxxx&` | Stream servislerini enable/disable eder. | App tarafini sade tutmak icin ileride yararli. |
-| MCU -> LP | `MCU+CAP+PLMxxxxxxxx&` | Desteklenen local input mode'lar. | Test edildi: `00008016` WiFi/BT/USB/Aux/Optical, `00008214` WiFi/BT/USB/XLR/Optical. Firmware hedefi `00008214`; bu projede USB DAC fiziksel olarak yok, USB flash playback icin `PLY+INF mode=11` esas alinir. |
-| MCU -> LP | `MCU+SID+name&` | Default SSID, CAP cevaplarinin sonunda. | Firmware `DSP_Amp` donuyor. |
-| LP -> MCU | `AXX+BOT+DON` | Modul boot ediyor ama hazir degil. | AX31 RE ile uyumlu. |
-| LP -> MCU | `AXX+BOT+UP0` | Modul acildi; `MCU+BOT+DON` heartbeat/boot cevabi sonrasi da gelir. | AX31 RE ile uyumlu. |
-| LP -> MCU | `AXX+MCU+RDY` | Modul MCU ile konusmaya hazir. | Firmware isliyor. |
+| LP -> MCU | `AXX+CAP+GET` | Requests product capability information during factory setup or OOBE. | The firmware responds. It may not appear during a normal AX31 boot. |
+| MCU -> LP | `MCU+CAP+PRJproject_name&` | Required project or product name. | Can be added if OOBE is needed. |
+| MCU -> LP | `MCU+PTV+nnn` | MCU protocol version. | The AX31 firmware uses `MCU+VER+0035`. |
+| MCU -> LP | `MCU+CAP+001xxxxxxxx&` | Capability bits. | Bit 16 indicates an MCU RTC. The capability notes record an RTC without a backup battery. See the later RTC decision below for the board configuration. |
+| MCU -> LP | `MCU+CAP+002xxxxxxxx&` | Second set of capability bits. | The actual CAP2 value is unclear. Confirm it independently from `capability` in `INF`. |
+| MCU -> LP | `MCU+CAP+LAUlanguage&` | Default language. | May be optional for this project. |
+| MCU -> LP | `MCU+CAP+STMxxxxxxxx&` | Enables or disables streaming services. | Could help simplify the app's service list. |
+| MCU -> LP | `MCU+CAP+PLMxxxxxxxx&` | Supported local input modes. | Tested `00008016` for Wi-Fi/BT/USB/Aux/Optical and `00008214` for Wi-Fi/BT/USB/XLR/Optical. The firmware uses `00008214`. This project has no USB DAC hardware. Use `PLY+INF mode=11` for USB flash playback. |
+| MCU -> LP | `MCU+SID+name&` | Default SSID at the end of the capability responses. | The firmware returns `DSP_Amp`. |
+| LP -> MCU | `AXX+BOT+DON` | The module is booting. | Matches AX31 observations. |
+| LP -> MCU | `AXX+BOT+UP0` | The module has started. It can also follow the `MCU+BOT+DON` heartbeat or boot response. | Matches AX31 observations. |
+| LP -> MCU | `AXX+MCU+RDY` | The module is ready to communicate with the MCU. | Handled by the firmware. |
 
-### Power, Sleep ve Firmware Update
+### Power, sleep and firmware updates
 
-| Yon | Komut | PDF'teki anlam | Proje notu |
+| Direction | Command | Meaning in the PDF | Project notes |
 | --- | --- | --- | --- |
-| MCU -> LP | `MCU+POW+OFF` | WiFi module power-off hazirligi ister. | AX31'de test edildi; `AXX+POW+OFF` yaklasik 5.16 s sonra geldi. |
-| LP -> MCU | `AXX+POW+OFF` | Kapatma izni/hazir cevabi. | Gelirse LP rail kesilebilir; 8-10 s timeout onerilir. |
-| LP -> MCU | `AXX+BURNING` | OTA/update devam ediyor; guc kesilmemeli. | Hard-off state machine'e mutlaka eklenmeli. |
-| LP -> MCU | `AXX+BURN002` | Update/lighting etkileri icin varyant olarak geciyor. | Sadece not. |
-| MCU -> LP | `MCU+POW+SAV` | Sleep/power-save. | AX31'de `AXX+POW+001` + `AXX+RA0+000` ile goruldu. |
-| MCU -> LP | `MCU+POW+RES` | Sleep'ten uyandirma. | AX31'de test edildi; `AXX+POW+000` ve network/prompt event dalgasi uretir. |
-| MCU -> LP | `MCU+POW+STA` | Power status sorgusu. | AX31'de test edildi: `000` active, `001` power-save. |
-| MCU -> LP | `MCU+FCRYPOW` | Factory restore ve power-off istegi. | Riskli; yalniz test modunda. |
-| LP -> MCU | `AXX+DEV+RST` | Modul restart bildirimi. | Restart durumunda UI/source state temizlenebilir. |
+| MCU -> LP | `MCU+POW+OFF` | Asks the Wi-Fi module to prepare for power-off. | On AX31, `AXX+POW+OFF` arrived about 5.16 s later. |
+| LP -> MCU | `AXX+POW+OFF` | Acknowledges readiness for power-off. | The LP rail can be cut after this response. Allow an 8–10 s timeout. |
+| LP -> MCU | `AXX+BURNING` | An OTA or firmware update is underway. Keep power connected. | Handle in the hard-off state machine. |
+| LP -> MCU | `AXX+BURN002` | Listed as a variant for update or lighting effects. | Reference only. |
+| MCU -> LP | `MCU+POW+SAV` | Enters sleep or power-save. | On AX31, this produced `AXX+POW+001` and `AXX+RA0+000`. |
+| MCU -> LP | `MCU+POW+RES` | Resumes from sleep. | On AX31, this produced `AXX+POW+000` and a burst of network or prompt events. |
+| MCU -> LP | `MCU+POW+STA` | Queries power state. | On AX31, `000` means active and `001` means power-save. |
+| MCU -> LP | `MCU+FCRYPOW` | Requests factory restore and power-off. | Use only in test mode. |
+| LP -> MCU | `AXX+DEV+RST` | Module restart notification. | A restart can clear UI or source state. |
 
-### RTC, Zaman ve Alarm
+### RTC, time and alarm
 
-| Yon | Komut | PDF'teki anlam | Proje notu |
+| Direction | Command | Meaning in the PDF | Project notes |
 | --- | --- | --- | --- |
-| LP -> MCU | `AXX+GET+RTC` | MCU RTC bilgisini ister. | Firmware `MCU+RTC+GET` ile network time ister. |
-| LP -> MCU | `AXX+SET+RTCYYYYMMDDHHMMSS&` | WiFi/app MCU saatini set eder. | Firmware su an isliyor. |
-| LP -> MCU | `AXX+APP+RTCYYYYMMDDHHMMSS&` | App tarafindan gelen RTC set. | Firmware su an islemiyor; `SET+RTC` ile benzer ele alinabilir. |
-| MCU -> LP | `MCU+RTC+GET` | MCU WiFi'dan saat ister. | Firmware bunu `AXX+GET+RTC` icin "gecerli RTC yok, network time ver" cevabi olarak kullaniyor. |
-| MCU -> LP | `MCU+SND+RTCYYYYMMDDHHMMSS&` | MCU WiFi RTC'sini set eder. | AX31'de etkili oldugu goruldu, fakat `MCU+RTC+GET` ile geri soruldugunda verilen saate yaklasik +6 saat uygulanmis deger donuyor. Otomatik firmware akisinda kullanilmamali. |
-| MCU -> LP | `MCU+WEK+GET` | Alarm/wek bilgisi sorgusu. | Bu projede oncelik dusuk. |
+| LP -> MCU | `AXX+GET+RTC` | Requests the MCU's RTC time. | The firmware asks for network time with `MCU+RTC+GET`. |
+| LP -> MCU | `AXX+SET+RTCYYYYMMDDHHMMSS&` | The Wi-Fi module or app sets the MCU clock. | Handled by the firmware. |
+| LP -> MCU | `AXX+APP+RTCYYYYMMDDHHMMSS&` | RTC update from the app. | Currently unhandled. Could be processed like `SET+RTC`. |
+| MCU -> LP | `MCU+RTC+GET` | Requests time from the Wi-Fi module. | Used in response to `AXX+GET+RTC` when network time is needed. |
+| MCU -> LP | `MCU+SND+RTCYYYYMMDDHHMMSS&` | Sets the Wi-Fi module's RTC. | AX31 accepted it, but querying the time again with `MCU+RTC+GET` returned a value about six hours ahead of the input. Keep it out of automatic flows. |
+| MCU -> LP | `MCU+WEK+GET` | Queries alarm or weekday information. | Low priority for this project. |
 
-RTC karari: STM32 RTC peripheral LSE ile calisiyor ve VBAT tarafinda harici pil
-beslemesi var. Firmware live clock icin donanim RTC'yi tercih ediyor; harici
-25xx EEPROM sadece snapshot/fallback olarak kullaniliyor. LP internete bagliysa
-`MCU+RTC+GET` ile gelen `AXX+SET+RTC...` guvenilir NTP kaynagi kabul ediliyor.
-MCU'dan LP'ye saat set etme tarafi (`MCU+SND+RTC...`) AX31'de offsetli
-davrandigi icin normal akisa alinmadi.
+The STM32 hardware RTC runs from LSE and has an external battery supply on VBAT. The firmware uses it for the live clock and uses the external 25xx EEPROM for snapshots and fallback. When LP is online, the `AXX+SET+RTC...` response to `MCU+RTC+GET` is treated as an NTP time source. The MCU-to-LP clock setting path (`MCU+SND+RTC...`) is excluded from normal operation due to the offset observed on AX31.
 
-### Bluetooth ve Kaynak Gecisleri
+### Bluetooth and source switching
 
-| Yon | Komut | PDF'teki anlam | Proje notu |
+| Direction | Command | Meaning in the PDF | Project notes |
 | --- | --- | --- | --- |
-| LP -> MCU | `AXX+BT+CON1` | Bluetooth baglandi. | Firmware su an ayrica BT UART izliyor; LP event'i desteklenebilir. |
-| LP -> MCU | `AXX+BT+CON0` | Bluetooth baglanti koptu. | UI/source state icin aday. |
-| MCU -> LP | `MCU+BT+CONN` | Son BT cihaza baglanma istegi. | Bizde BT module ayri UART'ta; LP'ye gerek olup olmadigi test edilmeli. |
-| MCU -> LP | `MCU+BT+PAIR` | BT pairing moduna gecme istegi. | Bizde BT module ayri UART'ta; sadece LP app senkronu icin aday. |
-| LP -> MCU | `AXX+SIL+001` | AX31 RE notuna gore BT'ye gecis istegi olabilir. | A98 PDF'teki BT bolumuyle birlikte tekrar test edilmeli. |
+| LP -> MCU | `AXX+BT+CON1` | Bluetooth connected. | The firmware also monitors a separate BT UART. This LP event could be supported. |
+| LP -> MCU | `AXX+BT+CON0` | Bluetooth disconnected. | Candidate for UI or source-state handling. |
+| MCU -> LP | `MCU+BT+CONN` | Requests reconnection to the last Bluetooth device. | The board has a separate BT UART. Test whether LP needs this command. |
+| MCU -> LP | `MCU+BT+PAIR` | Requests Bluetooth pairing mode. | The board has a separate BT UART. This may be useful for LP app synchronization. |
+| LP -> MCU | `AXX+SIL+001` | The AX31 notes suggest a request to switch to BT. | Retest alongside the A98 Bluetooth commands. |
+| LP -> MCU | `AXX+SIL+000` | The AX31 notes suggest a request to switch to Line In. | Retest. |
 
-BT UART notu: `+TITL/+ARTS/+ALBM` ve `BT_PA` satirlari telefon ekrani acilip
-kapaninca da gelebiliyor. Firmware bu satirlari hemen source takeover sebebi
-yapmaz; once kisa bir BT takeover aday penceresi acar. Bu pencerede `+SRC=NONE`
-gelirse aday iptal edilir, gelmezse LP'ye `MCU+PLY+PUS` atilip source Bluetooth'a
-alinir. BT'ye dogrudan gecis menu/IR veya LP app'ten gelen `AXX+PLM+041`
-uzerinden de yapilir.
-| LP -> MCU | `AXX+SIL+000` | AX31 RE notuna gore Line In'e gecis istegi olabilir. | Tekrar test edilmeli. |
+The separate BT UART can emit `+TITL/+ARTS/+ALBM` and `BT_PA` when the phone screen turns on or off. The firmware opens a short pending window before switching sources. If `+SRC=NONE` arrives during that window, it cancels the switch. Otherwise, it sends `MCU+PLY+PUS` to LP and selects Bluetooth. Bluetooth can also be selected directly from the menu, by IR, or through `AXX+PLM+041` from the LP app.
 
-### App / Pass-through / EQ
+### App pass-through and EQ
 
-| Yon | Komut | PDF'teki anlam | Proje notu |
+| Direction | Command | Meaning in the PDF | Project notes |
 | --- | --- | --- | --- |
-| LP -> MCU | `AXX+PAS+data&` | App'ten MCU'ya pass-through veri. | Firmware EQ icin kullaniyor. |
-| MCU -> LP/App | `MCU+PAS+data&` | MCU'dan app'e pass-through veri. | Firmware EQ report icin kullaniyor. |
-| LP -> MCU | `AXX+PAS+EQGet&` | App EQ durumunu sorar. | Firmware cevapliyor. |
-| LP -> MCU | `AXX+PAS+EQSet:bass:n&` | Bass EQ set. | Firmware DSP bass gain'e ceviriyor. |
-| LP -> MCU | `AXX+PAS+EQSet:treble:n&` | Treble EQ set. | Firmware DSP treble gain'e ceviriyor. |
-| MCU -> LP/App | `MCU+PAS+EQ:bass:n&` / `MCU+PAS+EQ:treble:n&` | PDF'te MCU cevabi olarak geciyor. | Firmware su an `EQSet` formuyla raporluyor; ileride uyumluluk icin karsilastirilmali. |
+| LP -> MCU | `AXX+PAS+data&` | Pass-through data from the app to the MCU. | Used for EQ. |
+| MCU -> LP/App | `MCU+PAS+data&` | Pass-through data from the MCU to the app. | Used to report EQ. |
+| LP -> MCU | `AXX+PAS+EQGet&` | The app queries EQ state. | The firmware responds. |
+| LP -> MCU | `AXX+PAS+EQSet:bass:n&` | Sets bass EQ. | The firmware converts it to DSP bass gain. |
+| LP -> MCU | `AXX+PAS+EQSet:treble:n&` | Sets treble EQ. | The firmware converts it to DSP treble gain. |
+| MCU -> LP/App | `MCU+PAS+EQ:bass:n&` / `MCU+PAS+EQ:treble:n&` | MCU reply format in the PDF. | The firmware currently reports using `EQSet`. Check compatibility with the PDF format. |
 
-## Firmware Icin Karar / Deneme Listesi
+## Firmware decisions and tests
 
-1. Hard-off state machine tasarlanabilir.
-   - `MCU+POW+OFF` gonder.
-   - `AXX+POW+OFF` icin 8 s bekle.
-   - `AXX+POW+OFF` gelirse mute LED 2 kisa blink yapar; kullanici fisi cekebilir.
-   - `AXX+BURNING` gelirse guc kesme iptal edilmeli.
-   - `AXX+BURNING` gelirse mute LED 3 hizli blink yapar ve ON kalir.
-   - Timeout durumunda mute LED 4 blink yapar ve ON kalir.
-   - Mevcut PCB'de LP rail kontrol IO'su ayrilmadigi icin hard-off fiziksel
-     guc kesmez; guvenli fis cekme geri bildirimi verir.
+1. Proposed hard-off handling.
+   - Send `MCU+POW+OFF`.
+   - Wait 8 s for `AXX+POW+OFF`.
+   - On `AXX+POW+OFF`, blink the mute LED twice briefly to indicate that the user can unplug the unit.
+   - On `AXX+BURNING`, cancel power-off.
+   - On `AXX+BURNING`, blink the mute LED three times quickly, then leave it on.
+   - On timeout, blink the mute LED four times, then leave it on.
+   - The current PCB has no LP rail control GPIO. The handshake signals when the user can disconnect power manually.
 
-2. Standby/power-save politikasi ayrilmali.
-   - `MCU+POW+SAV`: LP power-save; `AXX+POW+001` ve `AXX+RA0+000`.
-   - `MCU+POW+RES`: LP active; `AXX+POW+000`, ama WiFi prompt/event dalgasi yaratabilir.
-   - Standby'dan donerken once `MCU+POW+STA` sormak, `000` ise `RES` gondermemek daha iyi olabilir.
+2. Standby and power-save handling.
+   - `MCU+POW+SAV` enters LP power-save and produces `AXX+POW+001` and `AXX+RA0+000`.
+   - `MCU+POW+RES` returns LP to active and produces `AXX+POW+000`. It can also trigger Wi-Fi prompts and events.
+   - On leaving standby, query `MCU+POW+STA` first. If it returns `000`, skip `RES`.
 
-3. Boot handshake gozlemi tamamlandi ama urun davranisi netlestirilmeli.
-   - `AXX+BOT+DON/UP0` cold boot alaninda goruldu.
-   - Firmware bir kez `MCU+BOT+DON` donuyor.
-   - Elle `MCU+BOT+DON` gondermek `AXX+BOT+DON` ACK'i uretir; otomatik cevap flag ile sinirlanmali.
-   - Hard-off sonrasi cold boot ekraninda hedef akış:
-     `Handshake ready` -> `WiFi Connected` -> `Time synced` -> Standby ekran.
-   - "Connected to your WiFi network" anonsu handshake sonuna yakin geldigi icin
-     ekranda handshake'ten sonra ayri bir `WiFi Connected` asamasi gosterilmeli.
-   - `Time synced` son asama olmali; alttaki ilerleyen nokta animasyonu bu
-     asamada son noktaya gelmis gorunmeli.
+3. Boot handshake observations are complete. The desired product behavior still needs review.
+   - `AXX+BOT+DON/UP0` appeared during cold boot.
+   - The firmware replies once with `MCU+BOT+DON`.
+   - Sending `MCU+BOT+DON` manually produces a `AXX+BOT+DON` acknowledgment. Gate the automatic reply with a flag.
+   - After hard-off, the intended cold-boot screen sequence is `Handshake ready` -> `WiFi Connected` -> `Time synced` -> Standby.
+   - The “connected to your WiFi network” announcement arrives near the end of the handshake. Show a separate `WiFi Connected` stage after it.
+   - `Time synced` should be the final stage, with the progress animation on its last dot.
 
-4. RTC davranisi bugun icin yeterli.
+4. Current RTC behavior is sufficient.
    - `AXX+GET+RTC` -> `MCU+RTC+GET`.
-   - LP hazir degilse `AXX+RTC+NIL`.
-   - Network time gelince `AXX+SET+RTC...` push ediyor.
-   - `AXX+APP+RTC...` ve `AXX+SET+WEK...` ileride sessiz parser destegine alinabilir.
+   - If LP is not ready, it returns `AXX+RTC+NIL`.
+   - When network time becomes available, LP sends `AXX+SET+RTC...`.
+   - Silent parser support could be added later for `AXX+APP+RTC...` and `AXX+SET+WEK...`.
 
-5. BT source gecisleri icin PDF komutlari test edilmeli.
+5. Test the Bluetooth source-switching commands from the PDF.
    - `AXX+BT+CON1/CON0`
    - `MCU+BT+CONN`
    - `MCU+BT+PAIR`
-   - AX31'de gorulen `AXX+BT+GPRL`, `AXX+SIL+001`, `AXX+SIL+000`
+   - AX31 observations include `AXX+BT+GPRL`, `AXX+SIL+001` and `AXX+SIL+000`.
 
-6. `lp MCU+RTC+GET` playback sirasinda test edilmeli.
-   - Calarken `AXX+SET+RTC...`, `AXX+RTC+NIL` veya baska cevap geliyor mu kaydedilecek.
+6. Test `lp MCU+RTC+GET` during playback.
+   - Record whether it returns `AXX+SET+RTC...`, `AXX+RTC+NIL` or another response.
 
-7. `AXX+CAP+GET` eski AX31 firmware'de hic geliyor mu bakilmali.
-   - Gelirse minimum cevap seti: `MCU+CAP+PRJ...&`, `MCU+PTV...`,
-     `MCU+CAP+001...&`, `MCU+CAP+002...&`, `MCU+CAP+PLM...&`, `MCU+SID...&`.
-   - Bu kisim OOBE/factory restore akisinda kritik olabilir.
+7. Check whether older AX31 firmware ever sends `AXX+CAP+GET`.
+   - If it does, the minimum response set is `MCU+CAP+PRJ...&`, `MCU+PTV...`, `MCU+CAP+001...&`, `MCU+CAP+002...&`, `MCU+CAP+PLM...&` and `MCU+SID...&`.
+   - This exchange may be important during OOBE or factory restore.
 
-## Hemen Dokunulmamasi Gerekenler
+## Compatibility points to preserve
 
-- UART baud/format ayari: Mevcut firmware'deki ayar bu AX31 modul icin dogru
-  kabul edilecek.
-- `MCU+PLM-xxx` formu: Firmware ve AX31 boot notlari bu formu kullaniyor.
-- `MCU+POW+SAV`: Calisan eski davranis olarak korunmali; sadece anlami daha
-  dogru etiketlenmeli.
+- UART baud and framing. Use the firmware's current settings for this AX31 module.
+- `MCU+PLM-xxx`. The firmware and AX31 boot notes use this form.
+- `MCU+POW+SAV`. Preserve the observed behavior and label it as power-save.
